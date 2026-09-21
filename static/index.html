@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PubMed 文献分析 Demo (FastAPI + RAG)</title>
+<script src="chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #f4f6fb; --card: #ffffff; --text: #1f2430; --muted: #6b7280;
+    --border: #e5e8f0; --primary: #4f7cff; --primary-dark: #3a63e0;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
+  header.app-header { padding: 28px 16px; background: linear-gradient(135deg, #4f7cff 0%, #7b5cff 100%); color: #fff; }
+  header.app-header .container { padding-top: 0; padding-bottom: 0; }
+  header.app-header h1 { margin: 0 0 6px; font-size: 22px; }
+  header.app-header p { margin: 0; font-size: 13.5px; opacity: 0.9; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-top: 18px; }
+  .search-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  input[type="text"], input[type="password"], select { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 14px; background: #fbfcfe; }
+  #keywordInput { flex: 1 1 320px; min-width: 220px; }
+  button { border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; background: var(--primary); color: #fff; transition: background 0.15s; }
+  button:hover { background: var(--primary-dark); }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  button.secondary { background: #eef1fb; color: var(--primary-dark); }
+  button.secondary:hover { background: #e2e7fb; }
+  button.link-btn { background: transparent; color: var(--primary); padding: 4px 0; font-weight: 500; }
+  button.link-btn:hover { background: transparent; text-decoration: underline; }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .small-note { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  #advPanel { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--border); display: grid; gap: 12px; }
+  .field-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .field-row label { font-size: 13px; color: var(--muted); min-width: 130px; }
+  .field-row input, .field-row select { flex: 1 1 200px; }
+  #progressWrap { margin-top: 16px; }
+  .progress-track { background: #e9ecf5; border-radius: 999px; height: 8px; overflow: hidden; }
+  .progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #4f7cff, #7b5cff); transition: width 0.3s ease; }
+  #statusLine { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+  .stat-box { background: #f8f9ff; border: 1px solid var(--border); border-radius: 10px; padding: 14px; text-align: center; }
+  .stat-box .num { font-size: 24px; font-weight: 700; color: var(--primary-dark); }
+  .stat-box .label { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+  .charts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-top: 16px; }
+  .chart-box { background: #fbfcfe; border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .chart-box h3 { margin: 0 0 10px; font-size: 14px; color: var(--text); }
+  .chart-box canvas { max-height: 260px; }
+  #wordCloud { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; padding: 20px; background: #fbfcfe; border: 1px solid var(--border); border-radius: 10px; min-height: 140px; }
+  .wc-word { font-weight: 700; line-height: 1; cursor: default; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 10px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: #f8f9ff; font-size: 12.5px; color: var(--muted); position: sticky; top: 0; }
+  td.quartile-Q1 { color: #2f9e56; font-weight: 700; }
+  td.quartile-Q2 { color: #c48a1c; font-weight: 700; }
+  td.quartile-Q3, td.quartile-Q4 { color: #b45050; font-weight: 700; }
+  td.quartile-未收录 { color: var(--muted); }
+  .title-link { color: var(--primary-dark); text-decoration: none; }
+  .title-link:hover { text-decoration: underline; }
+  .table-wrap { max-height: 520px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .section-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .section-title-row h2 { margin: 0; font-size: 17px; }
+  .badge { display: inline-block; font-size: 12px; padding: 3px 10px; border-radius: 999px; margin-bottom: 12px; }
+  .badge-ai { background: #e5f7ec; color: #1e8f4f; }
+  .badge-rule { background: #fff3e0; color: #b06a12; }
+  #reportContent { white-space: pre-wrap; font-size: 14px; background: #fbfcfe; border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 30px; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="container">
+    <h1>PubMed 文献分析 Demo</h1>
+    <p>关键词 → 后端(FastAPI)检索 PubMed → 统计 / 词云 / 影响力排行 → RAG 生成中文综述报告</p>
+  </div>
+</header>
+
+<div class="container">
+  <div class="card">
+    <div class="search-row">
+      <input type="text" id="keywordInput" placeholder="输入检索关键词,例如: CRISPR gene therapy" />
+      <select id="retmaxSelect">
+        <option value="50">检索 50 篇</option>
+        <option value="100">检索 100 篇</option>
+        <option value="200" selected>检索 200 篇</option>
+        <option value="300">检索 300 篇(较慢)</option>
+      </select>
+      <button id="runBtn">开始检索分析</button>
+    </div>
+
+    <button id="advToggle" class="link-btn" style="margin-top:10px;">⚙ 高级设置(PubMed API Key / AI摘要配置)</button>
+    <div id="advPanel" class="hidden">
+      <div class="field-row">
+        <label>PubMed API Key</label>
+        <input type="password" id="apiKeyInput" placeholder="选填,提升请求速率(3→10次/秒),不填也可使用" />
+      </div>
+      <div class="field-row">
+        <label>AI摘要 API 地址</label>
+        <input type="text" id="llmBaseUrl" placeholder="选填,如 https://api.openai.com/v1 (OpenAI兼容base_url)" />
+      </div>
+      <div class="field-row">
+        <label>AI摘要 API Key</label>
+        <input type="password" id="llmApiKey" placeholder="选填,用于后端调用大模型生成更高质量的中文综述" />
+      </div>
+      <div class="field-row">
+        <label>模型名称</label>
+        <input type="text" id="llmModel" placeholder="选填,如 gpt-4o-mini / deepseek-chat,默认 gpt-4o-mini" />
+      </div>
+      <div class="small-note">
+        说明:检索与摘要生成均在后端(本机 FastAPI 服务)完成,密钥只在你本机服务进程内使用,随请求转发给对应官方接口,不会上传到任何第三方。
+        若不填写 AI摘要配置,后端将使用内置的规则统计版报告(见下方"综述报告"板块说明)。
+      </div>
+    </div>
+
+    <div id="progressWrap" class="hidden">
+      <div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+    </div>
+    <div id="statusLine" class="muted"></div>
+  </div>
+
+  <div id="resultsArea" class="hidden">
+
+    <div class="card">
+      <div class="section-title-row"><h2>1. 总体统计</h2>
+        <span class="muted">PubMed 总命中量: <b id="totalHits">-</b> 篇(下方统计基于本次实际抓取样本)</span>
+      </div>
+      <div class="stat-grid" style="margin-top:14px;">
+        <div class="stat-box"><div class="num" id="statTotal">0</div><div class="label">本次抓取文献数</div></div>
+        <div class="stat-box"><div class="num" id="statYearRange">-</div><div class="label">发表年份跨度</div></div>
+        <div class="stat-box"><div class="num" id="statMatched">0/0</div><div class="label">成功匹配影响因子/分区</div></div>
+        <div class="stat-box"><div class="num" id="statQ1">0</div><div class="label">Q1 区文献数</div></div>
+      </div>
+      <div class="charts-grid">
+        <div class="chart-box"><h3>按年份发表数量</h3><canvas id="yearChart"></canvas></div>
+        <div class="chart-box"><h3>期刊分区分布(JCR示例数据)</h3><canvas id="quartileChart"></canvas></div>
+        <div class="chart-box"><h3>各年份平均影响因子趋势</h3><canvas id="ifChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title-row"><h2>2. 研究方向词云</h2></div>
+      <p class="muted">基于文献标题与摘要的高频词提取(已剔除常见停用词),字号越大代表出现频率越高。</p>
+      <div id="wordCloud"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title-row">
+        <h2>3. 影响力排行(近5年内影响因子前100)</h2>
+        <button class="secondary" id="exportCsvBtn">导出 CSV</button>
+      </div>
+      <p class="muted">共 <b id="top100Count">0</b> 篇满足条件的文献(近5年内发表且期刊已匹配到影响因子)。影响因子/分区数据来自内置示例数据库,仅供demo参考,非官方最新JCR数据。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th style="width:40px;">排名</th><th>标题</th><th style="width:200px;">期刊</th><th style="width:60px;">年份</th><th style="width:70px;">影响因子</th><th style="width:60px;">分区</th></tr></thead>
+          <tbody id="top100Body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-title-row"><h2>4. 领域综述报告(中文,RAG 生成)</h2></div>
+      <span class="badge" id="reportSourceBadge"></span>
+      <div id="reportContent"></div>
+    </div>
+
+  </div>
+
+  <footer>
+    PubMed 文献分析 Demo · 后端 FastAPI + NCBI E-utilities · 摘要生成基于 TF-IDF 检索(RAG)+ 可选 LangChain/LLM · 影响因子/分区为内置示例数据
+  </footer>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
